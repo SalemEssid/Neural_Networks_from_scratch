@@ -1,0 +1,22 @@
+{
+    "seed": 42,
+    "learning_rate": 0.199,
+    "epochs": 160,
+    "batch_size": 64,
+    "architecture": [
+        784,
+        256,
+        128,
+        64,
+        10
+    ],
+    "activation": "relu",
+    "weight_initialization": "he",
+    "optimizer": "sgd",
+    "regularization_type": "l2",
+    "lambda_reg": 0.1,
+    "l1_ratio": 0.5,
+    "use_dropout": false,
+    "dropout_rate": 0.5,
+    "dropout_schedule": "constant"
+}

@@ -1,0 +1,21 @@
+{
+    "test_accuracy": 0.1403,
+    "test_loss": 2.8249009055645766,
+    "test_precision": 0.047594782726774164,
+    "test_recall": 0.1394726094323842,
+    "test_f1": 0.06243711888235833,
+    "best_val_accuracy": 0.14025,
+    "architecture": [
+        784,
+        392,
+        256,
+        128,
+        64,
+        32,
+        16,
+        10
+    ],
+    "learning_rate": 0.199,
+    "epochs": 60,
+    "activation": "relu"
+}

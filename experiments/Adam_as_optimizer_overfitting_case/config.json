@@ -1,0 +1,32 @@
+{
+    "seed": 42,
+    "learning_rate": 0.199,
+    "epochs": 60,
+    "batch_size": 64,
+    "architecture": [
+        784,
+        392,
+        256,
+        128,
+        64,
+        32,
+        16,
+        10
+    ],
+    "activation": "relu",
+    "weight_initialization": "he",
+    "optimizer": "adam",
+    "optimizer_params": {
+        "momentum": 0.9,
+        "decay_rate": 0.99,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "epsilon": 1e-08
+    },
+    "regularization_type": "none",
+    "lambda_reg": 0.1,
+    "l1_ratio": 0.5,
+    "use_dropout": false,
+    "dropout_rate": 0.5,
+    "dropout_schedule": "constant"
+}
