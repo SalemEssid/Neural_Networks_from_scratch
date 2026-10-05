@@ -1,3 +1,5 @@
+import pickle
+import time
 import numpy as np
 from src.core.network import initialize_parameter
 from src.training.trainer import Trainer
@@ -9,39 +11,47 @@ from src.utils.seed import set_seed
 from configs.config import CONFIG
 
 
-def main():
+# ============================================
+# CUSTOMIZE EXPERIMENT NAME HERE
+# ============================================
+CUSTOM_EXPERIMENT_NAME = "baseline"
+# Examples:
+# - "baseline_v1"
+# - "high_lr_experiment"
+# - "deep_network_test"
+# - "final_model"
+# ============================================
+
+
+def main(config=CONFIG, experiment_name=CUSTOM_EXPERIMENT_NAME):
     """
     Main training pipeline with experiment tracking.
+    
+    Args:
+        config: Configuration dictionary (defaults to configs/config.py)
+        experiment_name: Folder name under experiments/ (reused names are overwritten)
+    
+    Returns:
+        Summary dictionary that is also saved to summary.json
     """
     
-    # ============================================
-    # CUSTOMIZE EXPERIMENT NAME HERE
-    # ============================================
-    CUSTOM_EXPERIMENT_NAME = "Adam_as_optimizer"
-    # Examples:
-    # - "baseline_v1"
-    # - "high_lr_experiment"
-    # - "deep_network_test"
-    # - "final_model"
-    # ============================================
-    
     # Set seed for reproducibility
-    set_seed(CONFIG["seed"])
+    set_seed(config["seed"])
     
     # Initialize experiment manager
     exp_manager = ExperimentManager(root="experiments")
     experiment_paths = exp_manager.create_experiment(
-        experiment_name=CUSTOM_EXPERIMENT_NAME.strip()  # Remove any leading/trailing spaces
+        experiment_name=experiment_name.strip()  # Remove any leading/trailing spaces
     )
     
     print(f"Experiment directory: {experiment_paths['experiment_dir']}")
     
     # Save configuration
-    exp_manager.save_config(experiment_paths, CONFIG)
+    exp_manager.save_config(experiment_paths, config)
     
     # Initialize logger
     logger = ExperimentLogger(experiment_dir=experiment_paths["experiment_dir"])
-    logger.log_config(CONFIG)
+    logger.log_config(config)
     
     # Load and preprocess data
     print("Loading MNIST dataset...")
@@ -65,11 +75,11 @@ def main():
     print(f"Test samples: {X_test.shape[1]}")
     
     # Initialize network parameters using flexible architecture
-    print(f"Network architecture: {CONFIG['architecture']}")
+    print(f"Network architecture: {config['architecture']}")
     parameters = initialize_parameter(
-        X_train, 
-        CONFIG["architecture"], 
-        weight_init=CONFIG.get("weight_initialization", "he")
+        X_train,
+        config["architecture"],
+        weight_init=config.get("weight_initialization", "he")
     )
     
     model = {"parameters": parameters}
@@ -79,16 +89,18 @@ def main():
     
     # Train model
     print("\nStarting training...")
+    start_time = time.time()
     model = trainer.train(
         X_train, Y_train,
         X_val, Y_val,
-        CONFIG,
-        CONFIG["architecture"]
+        config,
+        config["architecture"]
     )
+    training_time = time.time() - start_time
     
     # Evaluate on test set
     print("\nEvaluating on test set...")
-    test_results = trainer.evaluate(X_test, Y_test, CONFIG["architecture"])
+    test_results = trainer.evaluate(X_test, Y_test, config["architecture"], config.get("activation", "relu"))
     
     # Print results
     print(f"\nTest Accuracy: {test_results['accuracy']:.4f}")
@@ -98,6 +110,7 @@ def main():
     print(f"Test F1: {test_results['f1']:.4f}")
     
     # Save results
+    history = trainer.get_history()
     summary = {
         "test_accuracy": float(test_results["accuracy"]),
         "test_loss": float(test_results["loss"]),
@@ -105,10 +118,19 @@ def main():
         "test_recall": float(test_results["recall"]),
         "test_f1": float(test_results["f1"]),
         "best_val_accuracy": float(model.get("best_val_accuracy", 0)),
-        "architecture": CONFIG["architecture"],
-        "learning_rate": CONFIG["learning_rate"],
-        "epochs": CONFIG["epochs"],
-        "activation": CONFIG["activation"]
+        "best_epoch": int(np.argmax(history["val_acc"])),
+        "final_train_accuracy": history["train_acc"][-1],
+        "final_val_accuracy": history["val_acc"][-1],
+        "training_time_seconds": round(training_time, 1),
+        "architecture": config["architecture"],
+        "activation": config.get("activation", "relu"),
+        "optimizer": config.get("optimizer", "sgd"),
+        "learning_rate": config["learning_rate"],
+        "epochs": config["epochs"],
+        "batch_size": config.get("batch_size", 64),
+        "regularization_type": config.get("regularization_type", "none"),
+        "lambda_reg": config.get("lambda_reg", 0.0),
+        "dropout_rate": config.get("dropout_rate", 0.5) if config.get("use_dropout", False) else 0.0
     }
     
     exp_manager.save_summary(experiment_paths, summary)
@@ -117,7 +139,6 @@ def main():
     visualizer = Visualizer(save_dir=experiment_paths["figures_dir"])
     
     # Plot training history
-    history = trainer.get_history()
     visualizer.plot_loss_and_accuracy(
         history["train_loss"],
         history["val_loss"],
@@ -133,8 +154,7 @@ def main():
         save_filename="confusion_matrix.png"
     )
     
-    # Save model weights
-    import pickle
+    # Save model weights (the best-validation checkpoint restored by the trainer)
     with open(experiment_paths["final_model"], 'wb') as f:
         pickle.dump(model["parameters"], f)
     
@@ -144,26 +164,9 @@ def main():
     print(f"  - Summary: {experiment_paths['summary_file']}")
     print(f"  - Figures: {experiment_paths['figures_dir']}")
     print(f"  - Model: {experiment_paths['final_model']}")
+    
+    return summary
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-# To save the experiments
-import json
-
-experiment_name = "experiment"
-
-with open(
-    f"logs/{experiment_name}_config.json", "w"
-) as f:
-    json.dump(CONFIG, f, indent=4)

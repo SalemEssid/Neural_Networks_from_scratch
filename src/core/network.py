@@ -7,6 +7,8 @@ def initialize_parameter(X, architecture, weight_init="he"):
     """
     Initialize parameters for a flexible neural network architecture.
     
+    Uses the global NumPy RNG, so call set_seed() beforehand for reproducible weights.
+    
     Args:
         X: Input data with shape (features, samples)
         architecture: List of layer sizes [input_size, hidden1, hidden2, ..., output_size]
@@ -15,7 +17,6 @@ def initialize_parameter(X, architecture, weight_init="he"):
     Returns:
         Dictionary with W and b for each layer
     """
-    np.random.seed(42)
     parameters = {}
     input_size = X.shape[0]
     
@@ -53,7 +54,7 @@ def linear_forward(A, W, b):
     return Z, cache
 
 
-def forward(X, parameters, architecture, activation="relu"):
+def forward(X, parameters, architecture, activation="relu", dropout=None):
     """
     Forward pass through the entire network.
     
@@ -62,6 +63,7 @@ def forward(X, parameters, architecture, activation="relu"):
         parameters: Dictionary of weights and biases
         architecture: List of layer sizes
         activation: Activation function ("relu" or "sigmoid")
+        dropout: Optional Dropout instance applied to every hidden layer (training only)
     
     Returns:
         A_final: Output of the network
@@ -77,8 +79,15 @@ def forward(X, parameters, architecture, activation="relu"):
         
         if activation == "relu":
             A = relu(Z)
-        else:
+        elif activation == "sigmoid":
             A = sigmoid(Z)
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
+        
+        # Inverted dropout: the mask is kept so backward() can zero the same units
+        if dropout is not None:
+            A, mask = dropout.forward(A, training=True)
+            cache[f"mask{layer_idx}"] = mask
         
         cache[f"cache{layer_idx}"] = linear_cache
         cache[f"Z{layer_idx}"] = Z
@@ -99,6 +108,12 @@ def relu_backward(dA, Z):
     """Compute gradient of ReLU activation"""
     dZ = dA * (Z > 0).astype(int)
     return dZ
+
+
+def sigmoid_backward(dA, Z):
+    """Compute gradient of sigmoid activation"""
+    s = sigmoid(Z)
+    return dA * s * (1 - s)
 
 
 def softmax_backward(Y, A_final):
@@ -128,7 +143,7 @@ def backward(X, Y, A_final, cache, architecture, activation="relu"):
         A_final: Output of the network
         cache: Dictionary of intermediate values
         architecture: List of layer sizes
-        activation: Activation function
+        activation: Activation function used in forward()
     
     Returns:
         grads: Dictionary of gradients
@@ -137,21 +152,29 @@ def backward(X, Y, A_final, cache, architecture, activation="relu"):
     num_layers = len(architecture) - 1
     
     # Output layer gradient (softmax + cross-entropy)
-    dA = softmax_backward(Y, A_final)
+    dZ = softmax_backward(Y, A_final)
     
     # Backward pass through layers (from output to input)
     for layer_idx in range(num_layers, 0, -1):
         # Compute linear gradients
-        dA_prev, dW, db = linear_backward(dA, cache[f"cache{layer_idx}"])
+        dA_prev, dW, db = linear_backward(dZ, cache[f"cache{layer_idx}"])
         
         grads[f"dW{layer_idx}"] = dW
         grads[f"db{layer_idx}"] = db
         
-        # Apply activation derivative for previous layer (if not input)
+        # Propagate into the previous hidden layer (the input layer needs no gradient)
         if layer_idx > 1:
-            dA = relu_backward(dA_prev, cache[f"Z{layer_idx-1}"])
-        else:
-            dA = dA_prev
+            prev_idx = layer_idx - 1
+            
+            # Units dropped in forward() get no gradient
+            mask = cache.get(f"mask{prev_idx}")
+            if mask is not None:
+                dA_prev = dA_prev * mask
+            
+            if activation == "relu":
+                dZ = relu_backward(dA_prev, cache[f"Z{prev_idx}"])
+            else:
+                dZ = sigmoid_backward(dA_prev, cache[f"Z{prev_idx}"])
     
     return grads
 
@@ -178,8 +201,7 @@ def update_parameters(parameters, grads, learning_rate, architecture):
     return parameters
 
 
-def predict(X, parameters, architecture):
+def predict(X, parameters, architecture, activation="relu"):
     """Make predictions on data"""
-    A_final, _ = forward(X, parameters, architecture)
+    A_final, _ = forward(X, parameters, architecture, activation)
     return np.argmax(A_final, axis=0)
-

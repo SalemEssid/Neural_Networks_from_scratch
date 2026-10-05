@@ -1,0 +1,27 @@
+{
+    "test_accuracy": 0.9796,
+    "test_loss": 0.10943473967630735,
+    "test_precision": 0.9794129071926985,
+    "test_recall": 0.9793847408852798,
+    "test_f1": 0.9793828928861131,
+    "best_val_accuracy": 0.981,
+    "best_epoch": 13,
+    "final_train_accuracy": 0.9964166666666666,
+    "final_val_accuracy": 0.9788333333333333,
+    "training_time_seconds": 267.6,
+    "architecture": [
+        784,
+        256,
+        128,
+        64,
+        10
+    ],
+    "activation": "relu",
+    "optimizer": "rmsprop",
+    "learning_rate": 0.001,
+    "epochs": 15,
+    "batch_size": 64,
+    "regularization_type": "none",
+    "lambda_reg": 0.0,
+    "dropout_rate": 0.0
+}

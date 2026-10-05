@@ -57,3 +57,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local notes (not part of the project)
+/GITHUB_METADATA.md
+/GITHUB_PUSH_GUIDE.md

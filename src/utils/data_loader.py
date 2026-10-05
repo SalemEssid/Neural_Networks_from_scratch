@@ -1,5 +1,4 @@
 import numpy as np
-from keras.datasets import mnist
 
 
 class DataLoader:
@@ -18,6 +17,9 @@ class DataLoader:
         Returns:
             Tuple of (X_train, Y_train, X_test, Y_test)
         """
+        # Imported here so the rest of the package doesn't pay for loading TensorFlow
+        from keras.datasets import mnist
+        
         (X_train, y_train), (X_test, y_test) = mnist.load_data()
         
         if normalize:
@@ -127,3 +129,26 @@ class DataLoader:
             batches.append((X_batch, Y_batch))
         
         return batches
+    
+    @staticmethod
+    def iterate_batches(X, Y, batch_size, shuffle=True):
+        """
+        Yield mini-batches one at a time, optionally in a fresh random order.
+        
+        Only the current batch is copied, so this is cheap to call every epoch.
+        
+        Args:
+            X: Input data with shape (features, samples)
+            Y: Labels with shape (classes, samples)
+            batch_size: Size of batches
+            shuffle: Whether to shuffle samples before batching
+        
+        Yields:
+            (X_batch, Y_batch) tuples
+        """
+        num_samples = X.shape[1]
+        indices = np.random.permutation(num_samples) if shuffle else np.arange(num_samples)
+        
+        for start_idx in range(0, num_samples, batch_size):
+            batch_indices = indices[start_idx:start_idx + batch_size]
+            yield X[:, batch_indices], Y[:, batch_indices]

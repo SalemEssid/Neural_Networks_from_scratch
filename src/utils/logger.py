@@ -24,6 +24,7 @@ class ExperimentLogger:
             self.experiment_dir = Path(experiment_dir)
             self.filepath = self.experiment_dir / "metrics.csv"
         else:
+            self.experiment_dir = None
             self.filepath = Path(filepath) if filepath else None
         
         self.history = []
@@ -56,9 +57,11 @@ class ExperimentLogger:
         if self.fieldnames is None:
             self.fieldnames = list(metrics_dict.keys())
         
-        # Append to CSV
+        # Write to CSV: the first write of a run replaces any file left by an
+        # earlier run with the same experiment name, later writes append
         if self.filepath:
-            with open(self.filepath, 'a', newline='') as f:
+            mode = 'a' if self.csv_initialized else 'w'
+            with open(self.filepath, mode, newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
                 
                 if not self.csv_initialized:

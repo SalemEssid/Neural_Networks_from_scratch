@@ -1,8 +1,9 @@
 import numpy as np
-from src.core.network import forward, backward, update_parameters, computing_cost
-from src.core.regularization import Regularizer
+from src.core.network import forward, backward, computing_cost
+from src.core.regularization import Regularizer, Dropout
 from src.optimizers import get_optimizer
 from src.evaluation.metrics import Metrics
+from src.utils.data_loader import DataLoader
 
 
 class Trainer:
@@ -30,7 +31,14 @@ class Trainer:
     
     def train(self, X_train, Y_train, X_val, Y_val, config, architecture):
         """
-        Train the neural network.
+        Train the neural network with mini-batch gradient descent.
+        
+        Each epoch shuffles the training set and makes one optimizer step per
+        mini-batch. Dropout (if enabled) and the regularization gradient are
+        applied on every step. At the end of each epoch, loss and accuracy are
+        measured on the full training and validation sets without dropout, so
+        the two are directly comparable. Reported losses are cross-entropy only
+        (no penalty term), the same quantity evaluate() reports for the test set.
         
         Args:
             X_train: Training data
@@ -41,10 +49,11 @@ class Trainer:
             architecture: Network architecture list
         
         Returns:
-            Trained model
+            Trained model (parameters restored to the best validation epoch)
         """
         lr = config["learning_rate"]
         epochs = config["epochs"]
+        batch_size = config.get("batch_size", 64)
         activation = config.get("activation", "relu")
         
         # Get optimizer
@@ -57,74 +66,42 @@ class Trainer:
         lambda_reg = config.get("lambda_reg", 0.0)
         l1_ratio = config.get("l1_ratio", 0.5)
         
+        # Dropout settings: one dropout rate per epoch
+        if config.get("use_dropout", False):
+            dropout_schedule = Dropout.create_dropout_schedule(
+                initial_rate=config.get("dropout_rate", 0.5),
+                epochs=epochs,
+                schedule_type=config.get("dropout_schedule", "constant")
+            )
+        else:
+            dropout_schedule = [0.0] * epochs
+        
         best_val_acc = 0
         best_params = None
         
         for epoch in range(epochs):
-            # Forward pass
-            A_train, cache_train = forward(X_train, self.model["parameters"], architecture, activation)
+            dropout = Dropout(dropout_schedule[epoch])
             
-            # Compute loss
-            data_loss = computing_cost(A_train, Y_train)
-            
-            # Add regularization to loss
-            if reg_type == "l2":
-                reg_loss = Regularizer.l2_penalty(self.model["parameters"], lambda_reg)
-            elif reg_type == "l1":
-                reg_loss = Regularizer.l1_penalty(self.model["parameters"], lambda_reg)
-            elif reg_type == "elastic_net":
-                reg_loss = Regularizer.elastic_net_penalty(self.model["parameters"], lambda_reg, l1_ratio)
-            else:
-                reg_loss = 0
-            
-            train_loss = data_loss + reg_loss
-            
-            # Backward pass
-            grads = backward(X_train, Y_train, A_train, cache_train, architecture, activation)
-            
-            # Add regularization gradients
-            if reg_type == "l2":
-                reg_grads = Regularizer.l2_gradient(self.model["parameters"], lambda_reg)
-            elif reg_type == "l1":
-                reg_grads = Regularizer.l1_gradient(self.model["parameters"], lambda_reg)
-            elif reg_type == "elastic_net":
-                reg_grads = Regularizer.elastic_net_gradient(self.model["parameters"], lambda_reg, l1_ratio)
-            else:
-                reg_grads = {}
-            
-            # Combine gradients
-            for key in reg_grads:
-                if key in grads:
+            for X_batch, Y_batch in DataLoader.iterate_batches(X_train, Y_train, batch_size, shuffle=True):
+                # Forward pass (with dropout)
+                A_batch, cache = forward(X_batch, self.model["parameters"], architecture,
+                                         activation, dropout=dropout)
+                
+                # Backward pass
+                grads = backward(X_batch, Y_batch, A_batch, cache, architecture, activation)
+                
+                # Add regularization gradients
+                reg_grads = Regularizer.gradient(reg_type, self.model["parameters"], lambda_reg,
+                                                 m=X_batch.shape[1], l1_ratio=l1_ratio)
+                for key in reg_grads:
                     grads[key] += reg_grads[key]
-                else:
-                    grads[key] = reg_grads[key]
+                
+                # Update parameters using optimizer
+                self.model["parameters"] = optimizer.update(self.model["parameters"], grads)
             
-            # Update parameters using optimizer
-            self.model["parameters"] = optimizer.update(self.model["parameters"], grads)
-            
-            # Compute training accuracy
-            y_pred_train = np.argmax(A_train, axis=0)
-            y_true_train = np.argmax(Y_train, axis=0)
-            train_acc = Metrics.accuracy(y_pred_train, y_true_train)
-            
-            # Validation
-            A_val, _ = forward(X_val, self.model["parameters"], architecture, activation)
-            val_data_loss = computing_cost(A_val, Y_val)
-            
-            # Add regularization to validation loss
-            if reg_type == "l2":
-                val_reg_loss = Regularizer.l2_penalty(self.model["parameters"], lambda_reg)
-            elif reg_type == "l1":
-                val_reg_loss = Regularizer.l1_penalty(self.model["parameters"], lambda_reg)
-            elif reg_type == "elastic_net":
-                val_reg_loss = Regularizer.elastic_net_penalty(self.model["parameters"], lambda_reg, l1_ratio)
-            else:
-                val_reg_loss = 0
-            
-            val_loss = val_data_loss + val_reg_loss
-            y_pred_val = np.argmax(A_val, axis=0)
-            y_true_val = np.argmax(Y_val, axis=0)
-            val_acc = Metrics.accuracy(y_pred_val, y_true_val)
+            # Epoch metrics in inference mode (no dropout)
+            train_loss, train_acc = self._loss_and_accuracy(X_train, Y_train, architecture, activation)
+            val_loss, val_acc = self._loss_and_accuracy(X_val, Y_val, architecture, activation)
             
             # Store history
             self.history["epochs"].append(epoch)
@@ -150,9 +127,8 @@ class Trainer:
                 best_params = {k: v.copy() for k, v in self.model["parameters"].items()}
             
             # Print progress
-            if epoch % 10 == 0:
-                print(f"Epoch {epoch:3d} | Loss: {train_loss:.4f} | "
-                      f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
+            print(f"Epoch {epoch:3d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+                  f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
         
         # Restore best model
         if best_params:
@@ -161,7 +137,14 @@ class Trainer:
         
         return self.model
     
-    def evaluate(self, X, Y, architecture):
+    def _loss_and_accuracy(self, X, Y, architecture, activation):
+        """Cross-entropy loss and accuracy of the current parameters (no dropout)."""
+        A, _ = forward(X, self.model["parameters"], architecture, activation)
+        y_pred = np.argmax(A, axis=0)
+        y_true = np.argmax(Y, axis=0)
+        return computing_cost(A, Y), Metrics.accuracy(y_pred, y_true)
+    
+    def evaluate(self, X, Y, architecture, activation="relu"):
         """
         Evaluate model on data.
         
@@ -169,11 +152,12 @@ class Trainer:
             X: Input data
             Y: Labels (one-hot encoded)
             architecture: Network architecture
+            activation: Activation function the model was trained with
         
         Returns:
             Dictionary with evaluation metrics
         """
-        A, _ = forward(X, self.model["parameters"], architecture)
+        A, _ = forward(X, self.model["parameters"], architecture, activation)
         loss = computing_cost(A, Y)
         
         y_pred = np.argmax(A, axis=0)
@@ -198,46 +182,3 @@ class Trainer:
     def get_history(self):
         """Get training history."""
         return self.history
-
-
-def train(model, X_train, Y_train, X_test, Y_test, lr, epochs):
-    """
-    Legacy training function for backward compatibility.
-    """
-    parameters = model["parameters"]
-    
-    for epoch in range(epochs):
-        # TRAIN STEP
-        A3, cache = forward(X_train, model["parameters"], [784, 128, 64, 10])
-        loss = computing_cost(A3, Y_train)
-        
-        grads = backward(X_train, Y_train, A3, cache, [784, 128, 64, 10])
-        
-        model["parameters"] = update_parameters(
-            model["parameters"], grads, lr, [784, 128, 64, 10]
-        )
-        
-        # EVALUATION
-        A3_train, _ = forward(X_train, model["parameters"], [784, 128, 64, 10])
-        train_acc = evaluate(model, X_train, Y_train)
-        test_acc = evaluate(model, X_test, Y_test)
-        
-        # LOGGING
-        if epoch % 10 == 0:
-            print(f"epoch {epoch} | loss {loss:.4f} | train {train_acc:.4f} | test {test_acc:.4f}")
-        
-        model["test_accuracy"] = test_acc
-    
-    return model
-
-
-def evaluate(model, X, Y):
-    """
-    Legacy evaluation function.
-    """
-    A3, _ = forward(X, model["parameters"], [784, 128, 64, 10])
-    
-    y_pred = np.argmax(A3, axis=0)
-    y_true = np.argmax(Y, axis=0)
-    
-    return np.mean(y_pred == y_true)
