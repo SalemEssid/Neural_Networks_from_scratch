@@ -49,7 +49,7 @@ OPTIMIZER_SERIES = [
 
 OVERFITTING_SERIES = [
     ("No regularization", "opt_adam"),
-    ("L2, λ = 1", "reg_l2_1"),
+    ("L2, λ = 0.01", "reg_l2_0.01"),
     ("Dropout 0.3", "dropout_0.3"),
     ("Dropout 0.5", "dropout_0.5"),
 ]
@@ -60,6 +60,7 @@ TEST_ACCURACY_GROUPS = [
         ("SGD", "opt_sgd"),
         ("Momentum", "opt_momentum"),
         ("RMSprop", "opt_rmsprop"),
+        ("Adam, lr 0.1", "opt_adam_lr0.1"),
     ]),
     ("Weight penalty", [
         ("L2, λ = 0.01", "reg_l2_0.01"),
@@ -82,8 +83,9 @@ TEST_ACCURACY_GROUPS = [
     ]),
 ]
 
-# Runs that failed to train are left out of the dot plot (noted in its subtitle)
-DIVERGED_BELOW = 0.5
+# Runs below this accuracy are pinned to the left edge of the dot plot so they
+# don't squash the axis for everything else
+OFF_SCALE_BELOW = 0.95
 
 
 def load_metrics(name):
@@ -155,6 +157,7 @@ def line_chart(mode, series, metric, title, subtitle, y_format, filename):
 
     ax.grid(axis="y", color=theme["grid"], linewidth=0.75)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 5, 10]))
     ax.yaxis.set_major_formatter(FuncFormatter(y_format))
     ax.set_xlabel("Epoch", color=theme["muted"], fontsize=9)
 
@@ -170,44 +173,43 @@ def line_chart(mode, series, metric, title, subtitle, y_format, filename):
 def test_accuracy_chart(mode):
     """Dot plot of test accuracy for every run, grouped, with the baseline marked."""
     theme = THEMES[mode]
-
+    
     rows = []        # (label, accuracy or None for a group header)
-    diverged = []
     for group, items in TEST_ACCURACY_GROUPS:
         rows.append((group, None))
         for label, name in items:
             summary = load_summary(name)
-            if summary is None:
-                continue
-            rows.append((label, summary["test_accuracy"]))
-    for name in ("opt_adam_lr0.1",):
-        summary = load_summary(name)
-        if summary is not None and summary["test_accuracy"] < DIVERGED_BELOW:
-            diverged.append(summary)
-
-    shown = [acc for _, acc in rows if acc is not None and acc >= DIVERGED_BELOW]
+            if summary is not None:
+                rows.append((label, summary["test_accuracy"]))
+    
+    in_range = [acc for _, acc in rows if acc is not None and acc >= OFF_SCALE_BELOW]
+    x_min = min(in_range) - 0.003
+    x_max = max(in_range) + 0.004
     baseline = load_summary(BASELINE)
-
-    height = 1.6 + 0.26 * len(rows)
-    subtitle = "Each dot is one 15-epoch run on the 10,000-image test set"
-    if diverged:
-        subtitle += f"; Adam at lr 0.1 diverged ({diverged[0]['test_accuracy']:.1%}) and is not shown"
+    
+    height = 1.45 + 0.26 * len(rows)
+    subtitle = ("One 15-epoch run each, scored on the 10,000-image test set. "
+                "Runs far below the range are pinned to the left edge")
     fig, ax = new_figure(theme, height, "Test accuracy by experiment", subtitle, left=1.75)
-
+    
     y_positions = list(range(len(rows)))[::-1]
     for (label, acc), y in zip(rows, y_positions):
-        if acc is None or acc < DIVERGED_BELOW:
+        if acc is None:
             continue
-        ax.plot(acc, y, "o", markersize=6.5, color=theme["series"][0],
+        off_scale = acc < OFF_SCALE_BELOW
+        x = x_min + 0.0004 if off_scale else acc
+        ax.plot(x, y, "<" if off_scale else "o", markersize=6.5, color=theme["series"][0],
                 markeredgecolor=theme["surface"], markeredgewidth=1.4, zorder=3)
-        ax.text(acc, y, f"   {acc:.2%}", color=theme["secondary"], fontsize=8.5,
-                va="center", ha="left")
-
+        text = f"   {acc:.2%}" + ("  (off scale)" if off_scale else "")
+        # Surface-colored backing keeps the baseline rule from running through the label
+        ax.text(x, y, text, color=theme["secondary"], fontsize=8.5, va="center", ha="left",
+                zorder=2.5, bbox=dict(facecolor=theme["surface"], edgecolor="none", pad=0.3))
+    
     if baseline is not None:
         ax.axvline(baseline["test_accuracy"], color=theme["muted"], linewidth=0.75, zorder=2)
         ax.text(baseline["test_accuracy"], len(rows) - 0.35, " baseline", color=theme["muted"],
                 fontsize=8.5, va="bottom", ha="left")
-
+    
     ax.set_yticks(y_positions)
     ax.set_yticklabels([label for label, _ in rows])
     for tick, (_, acc) in zip(ax.get_yticklabels(), rows):
@@ -215,12 +217,11 @@ def test_accuracy_chart(mode):
             tick.set_color(theme["ink"])
             tick.set_fontweight("semibold")
     ax.set_ylim(-0.6, len(rows) - 0.1)
-
-    if shown:
-        ax.set_xlim(min(shown) - 0.002, max(shown) + 0.004)
+    
+    ax.set_xlim(x_min, x_max)
     ax.grid(axis="x", color=theme["grid"], linewidth=0.75)
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.1%}"))
-
+    
     save(fig, "test_accuracy", mode)
 
 

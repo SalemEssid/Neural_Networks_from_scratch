@@ -24,6 +24,6 @@
     "lambda_reg": 0.0,
     "l1_ratio": 0.5,
     "use_dropout": true,
-    "dropout_rate": 0.1,
+    "dropout_rate": 0.3,
     "dropout_schedule": "constant"
 }

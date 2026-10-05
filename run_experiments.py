@@ -86,7 +86,7 @@ def print_table(names):
             continue
         s = json.loads(summary_file.read_text())
         gap = s["final_train_accuracy"] - s["final_val_accuracy"]
-        print(f"| {name} | {s['test_accuracy']:.2%} | {s['best_val_accuracy']:.2%} | {s['best_epoch']} | "
+        print(f"| {name} | {s['test_accuracy']:.2%} | {s['best_val_accuracy']:.2%} | {s['best_epoch'] + 1} | "
               f"{s['final_train_accuracy']:.2%} | {s['final_val_accuracy']:.2%} | {gap:+.2%} | "
               f"{s['training_time_seconds']} |")
 
