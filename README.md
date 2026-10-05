@@ -128,4 +128,10 @@ src/
 experiments/          one folder per run
 ```
 
+## Next work
+
+- [ ] **Phase 1: Forward-Forward classification.** Add Hinton's Forward-Forward (FF) algorithm for classification.
+- [ ] **Phase 2: Forward-Forward regression.** Reproduce FFR (Forward-Forward for Regression; Liu et al., 2026) on one tabular dataset, with variance across runs.
+- [ ] **Phase 3: Low-bit quantization.** Test an open question that the FFR authors list as a limitation: how layer-local training behaves under low-bit weight quantization.
+
 **Author:** Essid Salem
